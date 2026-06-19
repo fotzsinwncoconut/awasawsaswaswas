@@ -3,16 +3,16 @@ import requests
 from typing import Dict, List, Optional
 
 class LastFMClient:
-    """Last.fm API client - NO PREMIUM NEEDED, completely free"""
+    """Last.fm API - NO PREMIUM NEEDED"""
     
     def __init__(self):
         self.api_key = os.getenv("LASTFM_API_KEY")
         if not self.api_key:
-            raise ValueError("LASTFM_API_KEY not configured in .env")
+            raise ValueError("LASTFM_API_KEY not in .env")
         self.base_url = "http://ws.audioscrobbler.com/2.0/"
     
     def search_track(self, track_name: str, artist_name: str) -> Optional[Dict]:
-        """Search for a track"""
+        """Search track"""
         try:
             params = {
                 'method': 'track.search',
@@ -36,11 +36,11 @@ class LastFMClient:
                         'url': track.get('url', '')
                     }
         except Exception as e:
-            print(f"Search error: {e}")
+            print(f"Error: {e}")
         return None
     
     def get_similar_tracks(self, track_name: str, artist_name: str) -> List[Dict]:
-        """Get similar tracks (core of recommendation engine)"""
+        """Get similar tracks - THIS IS THE KEY"""
         try:
             params = {
                 'method': 'track.getSimilar',
@@ -68,75 +68,35 @@ class LastFMClient:
                     for t in tracks
                 ]
         except Exception as e:
-            print(f"Similar tracks error: {e}")
+            print(f"Error: {e}")
         return []
     
-    def get_artist_info(self, artist_name: str) -> Optional[Dict]:
-        """Get artist information"""
+    def get_artist_top_tracks(self, artist_name: str) -> List[Dict]:
+        """Get artist's top tracks"""
         try:
             params = {
-                'method': 'artist.getinfo',
+                'method': 'artist.getTopTracks',
                 'artist': artist_name,
                 'api_key': self.api_key,
-                'format': 'json'
-            }
-            response = requests.get(self.base_url, params=params, timeout=5)
-            data = response.json()
-            
-            if 'artist' in data:
-                artist = data['artist']
-                return {
-                    'name': artist.get('name', ''),
-                    'listeners': artist.get('stats', {}).get('listeners', 0),
-                    'bio': artist.get('bio', {}).get('summary', ''),
-                    'tags': [t.get('name') for t in artist.get('tags', {}).get('tag', [])]
-                }
-        except Exception as e:
-            print(f"Artist info error: {e}")
-        return None
-    
-    def get_top_artists(self) -> List[Dict]:
-        """Get chart top artists"""
-        try:
-            params = {
-                'method': 'chart.getTopArtists',
-                'api_key': self.api_key,
                 'format': 'json',
-                'limit': 50
+                'limit': 10
             }
             response = requests.get(self.base_url, params=params, timeout=5)
             data = response.json()
             
-            if 'artists' in data:
-                return [
-                    {'name': a.get('name', ''), 'listeners': a.get('listeners', 0)}
-                    for a in data['artists'].get('artist', [])
-                ]
-        except Exception as e:
-            print(f"Top artists error: {e}")
-        return []
-    
-    def get_top_tracks(self) -> List[Dict]:
-        """Get chart top tracks"""
-        try:
-            params = {
-                'method': 'chart.getTopTracks',
-                'api_key': self.api_key,
-                'format': 'json',
-                'limit': 50
-            }
-            response = requests.get(self.base_url, params=params, timeout=5)
-            data = response.json()
-            
-            if 'tracks' in data:
+            if 'toptracks' in data:
+                tracks = data['toptracks'].get('track', [])
+                if tracks and not isinstance(tracks, list):
+                    tracks = [tracks]
+                
                 return [
                     {
                         'name': t.get('name', ''),
                         'artist': t.get('artist', {}).get('name', ''),
-                        'listeners': t.get('listeners', 0)
+                        'listeners': int(t.get('listeners', 0))
                     }
-                    for t in data['tracks'].get('track', [])
+                    for t in tracks
                 ]
-        except Exception as e:
-            print(f"Top tracks error: {e}")
+        except:
+            pass
         return []

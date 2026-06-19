@@ -16,7 +16,6 @@ class Database:
     def init_tables(self):
         cursor = self.conn.cursor()
         
-        # Tracks table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS tracks (
                 id INTEGER PRIMARY KEY,
@@ -29,7 +28,6 @@ class Database:
             )
         """)
         
-        # Recommendations cache
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS recommendations (
                 id INTEGER PRIMARY KEY,
