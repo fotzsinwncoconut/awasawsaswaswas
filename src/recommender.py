@@ -1,115 +1,90 @@
-import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
 from typing import List, Dict
 from src.database import Database
-from src.spotify_client import SpotifyClient
-import os
+from src.lastfm_client import LastFMClient
 
 class RecommendationEngine:
+    """Recommendation engine using Last.fm similarity data"""
+    
     def __init__(self):
         self.db = Database()
-        self.spotify = SpotifyClient()
-        self.min_similarity = float(os.getenv("MIN_SIMILARITY_SCORE", 0.6))
+        self.lastfm = LastFMClient()
     
     def generate(self, count: int = 10) -> List[Dict]:
-        """Generar recomendaciones"""
+        """Generate recommendations from library"""
+        # Get high-rated tracks
         liked_tracks = self.db.get_high_rated_tracks(min_rating=7)
         
         if not liked_tracks:
             return []
         
-        liked_features = self._extract_features(liked_tracks)
-        if liked_features is None or len(liked_features) == 0:
-            return []
+        recommendations = {}
         
-        avg_features = np.mean(liked_features, axis=0)
-        similar_tracks = self._find_similar_from_artists(liked_tracks)
-        
-        if not similar_tracks:
-            return []
-        
-        candidate_features = self._extract_features(similar_tracks)
-        if candidate_features is None or len(candidate_features) == 0:
-            return []
-        
-        similarities = cosine_similarity([avg_features], candidate_features)[0]
-        
-        recommendations = []
-        for track, score in zip(similar_tracks, similarities):
-            if score >= self.min_similarity:
-                recommendations.append({
-                    'track': track['name'],
-                    'artist': track['artist'],
-                    'score': float(score),
-                    'spotify_id': track['spotify_id']
-                })
-        
-        recommendations = sorted(recommendations, key=lambda x: x['score'], reverse=True)
-        return recommendations[:count]
-    
-    def _extract_features(self, tracks: List[Dict]) -> np.ndarray:
-        """Extraer features de audio"""
-        features_list = []
-        
-        for track in tracks:
-            try:
-                features = self.db.conn.cursor().execute(
-                    "SELECT * FROM audio_features WHERE spotify_id = ?",
-                    (track['spotify_id'],)
-                ).fetchone()
-                
-                if features:
-                    feature_vector = [
-                        features[2], features[3], features[4], features[5],
-                        features[7], features[9], features[10], features[12]
-                    ]
-                    features_list.append(feature_vector)
+        # For each liked track, find similar tracks
+        for track in liked_tracks:
+            similar = self.lastfm.get_similar_tracks(
+                track['track'],
+                track['artist']
+            )
+            
+            # Weight by user rating
+            weight = track['rating'] / 10.0
+            
+            for rec in similar:
+                key = f"{rec['name']}|{rec['artist']}"
+                if key not in recommendations:
+                    recommendations[key] = {
+                        'track': rec['name'],
+                        'artist': rec['artist'],
+                        'score': rec['match'] * weight
+                    }
                 else:
-                    spotify_features = self.spotify.get_audio_features(track['spotify_id'])
-                    if spotify_features:
-                        self.db.add_audio_features(track['spotify_id'], spotify_features)
-                        feature_vector = [
-                            spotify_features.get('acousticness', 0),
-                            spotify_features.get('danceability', 0),
-                            spotify_features.get('energy', 0),
-                            spotify_features.get('instrumentalness', 0),
-                            spotify_features.get('loudness', 0),
-                            spotify_features.get('speechiness', 0),
-                            spotify_features.get('tempo', 0),
-                            spotify_features.get('valence', 0)
-                        ]
-                        features_list.append(feature_vector)
-            except Exception as e:
-                print(f"Error: {e}")
-                continue
+                    # Accumulate score if appears multiple times
+                    recommendations[key]['score'] += rec['match'] * weight
         
-        return np.array(features_list) if features_list else None
+        # Sort and return top N
+        sorted_recs = sorted(
+            recommendations.values(),
+            key=lambda x: x['score'],
+            reverse=True
+        )
+        
+        return sorted_recs[:count]
     
-    def _find_similar_from_artists(self, liked_tracks: List[Dict]) -> List[Dict]:
-        """Encontrar artistas similares"""
-        similar_tracks = []
-        seen_ids = {t['spotify_id'] for t in liked_tracks}
+    def discover_new(self, count: int = 10) -> List[Dict]:
+        """Discover new music from trending + similar artists"""
+        recommendations = {}
         
-        for track in liked_tracks[:5]:
-            try:
-                artist_id = self.spotify.get_artist_id(track['artist_name'])
-                if not artist_id:
-                    continue
-                
-                similar_artists = self.spotify.get_similar_artists(artist_id)
-                
-                for artist in similar_artists[:3]:
-                    top_tracks = self.spotify.get_artist_top_tracks(artist['id'])
-                    for t in top_tracks:
-                        if t['id'] not in seen_ids:
-                            similar_tracks.append({
-                                'spotify_id': t['id'],
-                                'name': t['name'],
-                                'artist': artist['name']
-                            })
-                            seen_ids.add(t['id'])
-            except Exception as e:
-                print(f"Error: {e}")
-                continue
+        # Get liked tracks and their artists
+        liked_tracks = self.db.get_high_rated_tracks(min_rating=7)
         
-        return similar_tracks
+        if not liked_tracks:
+            # If no library, return trending
+            trending = self.lastfm.get_top_tracks()
+            return [
+                {'track': t['name'], 'artist': t['artist'], 'score': 80}
+                for t in trending[:count]
+            ]
+        
+        # For each liked artist, find similar tracks
+        for track in liked_tracks[:5]:  # Top 5 liked tracks
+            similar = self.lastfm.get_similar_tracks(
+                track['track'],
+                track['artist']
+            )
+            
+            for rec in similar:
+                key = f"{rec['name']}|{rec['artist']}"
+                if key not in recommendations:
+                    recommendations[key] = {
+                        'track': rec['name'],
+                        'artist': rec['artist'],
+                        'score': rec['match']
+                    }
+        
+        sorted_recs = sorted(
+            recommendations.values(),
+            key=lambda x: x['score'],
+            reverse=True
+        )
+        
+        return sorted_recs[:count]

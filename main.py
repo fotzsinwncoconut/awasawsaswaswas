@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+"""
+Music Recommendation Engine - Sin necesidad de Spotify Premium
+Usa Last.fm + MusicBrainz (APIs 100% gratuitas)
+"""
+
 import typer
 from rich.console import Console
 from pathlib import Path
@@ -12,93 +17,101 @@ load_dotenv()
 
 @app.command()
 def init():
-    """Inicializar database"""
+    """Initialize database"""
     from src.database import Database
     db = Database()
     db.init_tables()
-    console.print("[green]✓[/green] Database inicializada")
+    console.print("[green]✓[/green] Database initialized")
 
 @app.command()
 def add(
-    track_name: str = typer.Argument(...),
-    artist_name: str = typer.Argument(...),
+    track_name: str,
+    artist_name: str,
     rating: int = typer.Option(5, min=1, max=10)
 ):
-    """Agregar canción a biblioteca"""
+    """Add track to your library"""
     from src.database import Database
-    from src.spotify_client import SpotifyClient
+    from src.lastfm_client import LastFMClient
     
-    console.print("[cyan]Buscando en Spotify...[/cyan]")
-    client = SpotifyClient()
+    client = LastFMClient()
     track_data = client.search_track(track_name, artist_name)
     
     if track_data:
         db = Database()
         db.add_track(track_data, rating)
-        console.print(f"[green]✓[/green] Agregada: {track_data['name']} - {track_data['artist']}")
+        console.print(f"[green]✓[/green] Added: {track_name} - {artist_name}")
     else:
-        console.print(f"[red]✗[/red] Canción no encontrada")
+        console.print(f"[red]✗[/red] Track not found")
 
 @app.command()
 def recommend(count: int = typer.Option(10)):
-    """Generar recomendaciones"""
+    """Generate recommendations based on your library"""
     from src.recommender import RecommendationEngine
     
-    console.print("[cyan]Generando recomendaciones...[/cyan]")
     engine = RecommendationEngine()
     recommendations = engine.generate(count)
     
     if not recommendations:
-        console.print("[yellow]⚠[/yellow] No hay recomendaciones. Agrega más canciones.")
+        console.print("[yellow]No recommendations yet. Add more tracks first.[/yellow]")
         return
     
-    console.print("\n[bold cyan]Recomendaciones:[/bold cyan]")
+    console.print("\n[bold cyan]Recommended Tracks:[/bold cyan]")
     for i, rec in enumerate(recommendations, 1):
-        console.print(f"{i}. {rec['track']} - {rec['artist']} (score: {rec['score']:.2f})")
+        console.print(f"{i}. {rec['track']} - {rec['artist']} (match: {rec['score']:.0f}%)")
 
 @app.command()
 def library():
-    """Ver biblioteca"""
+    """Show your music library"""
     from src.database import Database
     
     db = Database()
     tracks = db.get_all_tracks()
     
     if not tracks:
-        console.print("[yellow]Tu biblioteca está vacía[/yellow]")
+        console.print("[yellow]Library is empty. Add tracks first.[/yellow]")
         return
     
-    console.print("\n[bold cyan]Tu Biblioteca:[/bold cyan]")
+    console.print("\n[bold cyan]Your Library:[/bold cyan]")
     for track in tracks:
-        rating = "★" * track['rating'] + "☆" * (10 - track['rating'])
-        console.print(f"• {track['track_name']} - {track['artist_name']} [{rating}]")
+        console.print(f"• {track['track']} - {track['artist']} (★ {track['rating']}/10)")
+    console.print(f"\nTotal: {len(tracks)} tracks")
 
 @app.command()
 def status():
-    """Ver estado del sistema"""
-    console.print("[bold cyan]Status:[/bold cyan]")
+    """Check system status"""
+    checks = []
+    
+    # Python
+    import sys
+    checks.append((f"Python {sys.version.split()[0]}", True))
+    
+    # Dependencies
+    try:
+        import requests
+        checks.append(("requests", True))
+    except:
+        checks.append(("requests", False))
     
     try:
-        import librosa
-        console.print("[green]✓[/green] librosa OK")
+        import sklearn
+        checks.append(("scikit-learn", True))
     except:
-        console.print("[red]✗[/red] librosa falta")
+        checks.append(("scikit-learn", False))
     
-    try:
-        import spotipy
-        console.print("[green]✓[/green] spotipy OK")
-    except:
-        console.print("[red]✗[/red] spotipy falta")
+    # API keys
+    lastfm_key = os.getenv("LASTFM_API_KEY")
+    checks.append(("Last.fm API configured", bool(lastfm_key)))
     
-    if os.getenv("SPOTIFY_CLIENT_ID"):
-        console.print("[green]✓[/green] Spotify API configurada")
-    else:
-        console.print("[red]✗[/red] Spotify API no configurada (.env)")
+    # Database
+    db_exists = Path(os.getenv("DB_PATH", "music_library.db")).exists()
+    checks.append(("Database initialized", db_exists))
     
-    if Path(os.getenv("DB_PATH", "music_library.db")).exists():
-        console.print("[green]✓[/green] Database lista")
-    else:
-        console.print("[red]✗[/red] Database no inicializada (corre: python main.py init)")
+    console.print("\n[bold cyan]System Status:[/bold cyan]")
+    for check, status in checks:
+        symbol = "[green]✓[/green]" if status else "[red]✗[/red]"
+        console.print(f"{symbol} {check}")
+    
+    print()
 
 if __name__ == "__main__":
     app()
